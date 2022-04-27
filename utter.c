@@ -25,8 +25,9 @@ static void do_listen(int, dictionary_t*);
 static void do_utter(int, dictionary_t*);
 static void do_shh(int, dictionary_t*);
 static void do_sync(int, dictionary_t*);
+static void do_userPosts(int fd, dictionary_t* query);
 static char *makeUserID(char* user);
-static char* getUserUtters(int, dictionary_t *, const char **);
+static char* getUserUtters(int, dictionary_t *, const char **, char *);
 
 struct dictionary_t *users_posts_dict;
 char *HOST_NAME = NULL, *PORT = NULL;
@@ -141,6 +142,9 @@ void doit(int fd){
       else if(starts_with("/sync", uri)){
         do_sync(fd, query);
       }
+      else if(starts_with("/userPosts", uri)){
+        do_userPosts(fd, query);
+      }
       // serve_request(fd, query);
 
       /* Clean up */
@@ -191,18 +195,49 @@ static void do_listen(int fd, dictionary_t* query){
 
   const char **utter_ids = dictionary_keys(user_messages_dict);
  
-  char *body = getUserUtters(count, user_messages_dict, utter_ids);
+  char *body = getUserUtters(count, user_messages_dict, utter_ids, " ");
   serve_request(fd, query, body);
 }
 
-static char* getUserUtters(int count, dictionary_t *user_messages_dict, const char **utter_ids){
+static void do_userPosts(int fd, dictionary_t* query){
+   char *user = dictionary_get(query, "user");
+
+  if(dictionary_count(query) < 1 || user == NULL){
+    clienterror(fd, "POST","400", "Bad Request",
+            "Utter did not recognize the request");
+    serve_request(fd, query, "error");
+    return;
+  }
+  dictionary_t *user_messages_dict;
+
+  if((user_messages_dict = dictionary_get(users_posts_dict, user)) == NULL){
+    clienterror(fd, "POST","400", "Bad Request",
+            "Utter did not recognize the request");
+    serve_request(fd, query, "error");
+    return;
+  }
+
+  size_t count = dictionary_count(user_messages_dict);
+  if(count == 0){
+    serve_request(fd, query,"");
+    return;
+  }
+  // print_stringdictionary(user_messages_dict);
+
+  const char **utter_ids = dictionary_keys(user_messages_dict);
+ 
+  char *body = getUserUtters(count, user_messages_dict, utter_ids, "\r");
+  serve_request(fd, query, body);
+}
+
+static char* getUserUtters(int count, dictionary_t *user_messages_dict, const char **utter_ids, char* sep){
   char *posts[count + 1];
   posts[count] = NULL;
   char *message;
 
   for(size_t i = 0; i < count; i++){
     message = dictionary_get(user_messages_dict, utter_ids[i]);
-    posts[i] = append_strings(utter_ids[i], " ", message, NULL);
+    posts[i] = append_strings(utter_ids[i], sep, message, NULL);
   }
   return join_strings((const char * const*) posts, '\n');
 }
@@ -299,7 +334,7 @@ static void do_sync(int fd, dictionary_t* query){
   char buf[MAXBUF], response[MAXBUF];
   int con = open_clientfd(host_name, port);
 
-  sprintf(buf, "GET /listen?user=%s HTTP/1.0\r\n\r\n", query_encode(user));
+  sprintf(buf, "GET /userPosts?user=%s HTTP/1.0\r\n\r\n", query_encode(user));
   Rio_writen(con, buf, strlen(buf));
   Shutdown(con, SHUT_WR);
 
@@ -361,11 +396,11 @@ static void do_sync(int fd, dictionary_t* query){
   for(int i = 0; new_utters[i] != NULL; i++){ // Null terminated char array
     if(strcmp(new_utters[i], "\r") == 0)
       continue;
-    utter = split_string(new_utters[i], ' '); // <utter_id> <message>
+    utter = split_string(new_utters[i], '\r'); // <utter_id> <message>
     dictionary_set(user_utters, strdup(utter[0]), strdup(utter[1]));
   }
   
-  char *body = getUserUtters(dictionary_count(user_utters), user_utters, dictionary_keys(user_utters));
+  char *body = getUserUtters(dictionary_count(user_utters), user_utters, dictionary_keys(user_utters), " ");
 
   serve_request(fd, query, body);
   Close(con);
