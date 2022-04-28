@@ -28,11 +28,13 @@ static void do_sync(int, dictionary_t*);
 static void do_userPosts(int fd, dictionary_t* query);
 static char *makeUserID(char* user);
 static char* getUserUtters(int, dictionary_t *, const char **, char *);
+static void* init_thread(void *thread);
 
 struct dictionary_t *users_posts_dict;
 char *HOST_NAME = NULL, *PORT = NULL;
 int id_num = 0;
 const size_t MAX_ID = 50;
+pthread_mutex_t lock_vars;
 
 #ifdef SILENCE_PRINTF
 #define printf(...)
@@ -41,7 +43,7 @@ const size_t MAX_ID = 50;
 
 int main(int argc, char **argv) {
 
-  users_posts_dict = make_dictionary(COMPARE_CASE_SENS, NULL);
+  users_posts_dict = make_dictionary(COMPARE_CASE_SENS, free);
 
   int listenfd, connfd;
   char hostname[MAXLINE], port[MAXLINE];
@@ -56,6 +58,7 @@ int main(int argc, char **argv) {
   }
 
   listenfd = Open_listenfd(argv[1]);
+  pthread_mutex_init(&lock_vars, NULL);
 
   PORT = strdup(argv[1]);
 
@@ -77,14 +80,21 @@ int main(int argc, char **argv) {
       if(HOST_NAME == NULL){
         HOST_NAME = strdup(hostname);
       }
-
-      doit(connfd);
-      Close(connfd);
-      printf("connection closed\n");
+      int *con = malloc(sizeof(int));
+      *con = connfd;
+      pthread_t thread;
+      Pthread_create(&thread, NULL, init_thread,(void *) con);
+      pthread_detach(thread);
     }
   }
 }
-
+static void* init_thread(void *con){
+  doit(*(int*) con);
+  Close(*(int*) con);
+  printf("connection closed\n");
+  free(con);
+  return NULL;
+}
 /*
  * doit - handle one HTTP request/response transaction
  */
@@ -131,19 +141,29 @@ void doit(int fd){
          but the intial implementation always returns
          "hello world": */
       if(starts_with("/listen", uri)){
+        pthread_mutex_lock(&lock_vars);
         do_listen(fd, query);
+        pthread_mutex_unlock(&lock_vars);
       }
       else if(starts_with("/utter",uri)){
+        pthread_mutex_lock(&lock_vars);
         do_utter(fd, query);
+        pthread_mutex_unlock(&lock_vars);
       }
       else if(starts_with("/shh", uri)){
+        pthread_mutex_lock(&lock_vars);
         do_shh(fd, query);
+        pthread_mutex_unlock(&lock_vars);
       }
       else if(starts_with("/sync", uri)){
+        pthread_mutex_lock(&lock_vars);
         do_sync(fd, query);
+        pthread_mutex_unlock(&lock_vars);
       }
       else if(starts_with("/userPosts", uri)){
+        pthread_mutex_lock(&lock_vars);
         do_userPosts(fd, query);
+        pthread_mutex_unlock(&lock_vars);
       }
       // serve_request(fd, query);
 
@@ -385,6 +405,7 @@ static void do_sync(int fd, dictionary_t* query){
   }
   Rio_readnb(&rio, response, count);
   response[count] = 0; // NULL terminating. 
+  pthread_mutex_lock(&lock_vars);
   dictionary_t *user_utters = dictionary_get(users_posts_dict, user);
   if (user_utters == NULL){ // make a new dictionary for a user's post on this server in case it doesn't exist
     user_utters = make_dictionary(COMPARE_CASE_SENS, NULL);
@@ -401,7 +422,7 @@ static void do_sync(int fd, dictionary_t* query){
   }
   
   char *body = getUserUtters(dictionary_count(user_utters), user_utters, dictionary_keys(user_utters), " ");
-
+  pthread_mutex_unlock(&lock_vars);
   serve_request(fd, query, body);
   Close(con);
 }
