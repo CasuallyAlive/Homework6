@@ -1,5 +1,6 @@
 /*
  * utter.c - [Starting code for] a web-based Ute social network.
+ * Edited by, Jordy A. Larrea Rodriguez (U1236145)
  *
  * Based on:
  *  tiny.c - A simple, iterative HTTP/1.0 Web server that uses the
@@ -61,6 +62,7 @@ int main(int argc, char **argv) {
   pthread_mutex_init(&lock_vars, NULL);
 
   PORT = strdup(argv[1]);
+  HOST_NAME = hostname;
 
   /* Don't kill the server if there's an error, because
      we want to survive errors due to a client. But we
@@ -74,12 +76,7 @@ int main(int argc, char **argv) {
     clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
     if (connfd >= 0) {
-      Getnameinfo((SA *) &clientaddr, clientlen, hostname, MAXLINE,
-          port, MAXLINE, 0);
-      printf("Accepted connection from (%s, %s)\n", hostname, port);
-      if(HOST_NAME == NULL){
-        HOST_NAME = strdup(hostname);
-      }
+
       int *con = malloc(sizeof(int));
       *con = connfd;
       pthread_t thread;
@@ -271,8 +268,8 @@ static char* getUserUtters(int count, dictionary_t *user_messages_dict, const ch
  * @param query 
  */
 static void do_utter(int fd, dictionary_t* query){
-  char *user = dictionary_get(query, "user");
-  char *message = dictionary_get(query, "utterance");
+  char *user = strdup(dictionary_get(query, "user"));
+  char *message = strdup(dictionary_get(query, "utterance"));
 
   if(dictionary_count(query) < 1 || user == NULL || message == NULL){
     //report error
@@ -286,7 +283,7 @@ static void do_utter(int fd, dictionary_t* query){
   dictionary_t *user_utter_posts;
 
   if(dictionary_get(users_posts_dict, user) == NULL){
-    user_utter_posts = make_dictionary(COMPARE_CASE_SENS, NULL);
+    user_utter_posts = make_dictionary(COMPARE_CASE_SENS, free);
 
     dictionary_set(user_utter_posts, id, strdup(message)); //Set of messages
     dictionary_set(users_posts_dict, strdup(user), user_utter_posts);
@@ -295,6 +292,9 @@ static void do_utter(int fd, dictionary_t* query){
     dictionary_set(user_utter_posts, id, strdup(message));
   }
   // print_stringdictionary(user_utter_posts);
+  free(user);
+  free(message);
+
   serve_request(fd, query, id);
 }
 /**
@@ -322,14 +322,16 @@ static void do_shh(int fd, dictionary_t* query){
     serve_request(fd, query, "error");
     return;
   }
-  char *message;
-  if((message = dictionary_get(user_messages_dict, message_id)) == NULL){
+  if(dictionary_get(user_messages_dict, message_id) == NULL){
     serve_request(fd, query, "No such id.");
     return;
   }
 
   dictionary_remove(user_messages_dict, message_id);
   serve_request(fd, query, append_strings("Successfully removed id: ", message_id, NULL));
+
+  free(user);
+  free(message_id);
 }
 /**
  * @brief POST /sync?user=‹user›&hostname=‹hostname›&port=‹port› — Contacts an utter server running on ‹host› at ‹port› to get all of the posts of ‹user›, 
@@ -408,7 +410,7 @@ static void do_sync(int fd, dictionary_t* query){
   pthread_mutex_lock(&lock_vars);
   dictionary_t *user_utters = dictionary_get(users_posts_dict, user);
   if (user_utters == NULL){ // make a new dictionary for a user's post on this server in case it doesn't exist
-    user_utters = make_dictionary(COMPARE_CASE_SENS, NULL);
+    user_utters = make_dictionary(COMPARE_CASE_SENS, free);
     dictionary_set(users_posts_dict, user, user_utters);
   }
 
@@ -419,11 +421,22 @@ static void do_sync(int fd, dictionary_t* query){
       continue;
     utter = split_string(new_utters[i], '\r'); // <utter_id> <message>
     dictionary_set(user_utters, strdup(utter[0]), strdup(utter[1]));
+    free(new_utters[i]);
+    free(utter);
   }
-  
+  free(new_utters);
+
   char *body = getUserUtters(dictionary_count(user_utters), user_utters, dictionary_keys(user_utters), " ");
   pthread_mutex_unlock(&lock_vars);
   serve_request(fd, query, body);
+
+  free(version);
+  free(status);
+  free(desc);
+  free(user);
+  free(host_name);
+  free(port);
+
   Close(con);
 }
 
