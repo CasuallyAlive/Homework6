@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
   users_posts_dict = make_dictionary(COMPARE_CASE_SENS, free);
 
   int listenfd, connfd;
-  char hostname[MAXLINE], port[MAXLINE];
+  char hostname[MAXLINE];
 
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
